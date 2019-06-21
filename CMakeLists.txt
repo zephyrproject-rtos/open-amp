@@ -14,3 +14,7 @@ set(LIBMETAL_LIB ${ZEPHYR_BINARY_DIR}/ext/hal/libmetal/lib)
 
 add_subdirectory(${CONFIG_OPENAMP_SRC_PATH} open-amp)
 endif()
+
+if(CONFIG_RSC_TABLE)
+add_subdirectory(${CONFIG_RSC_TABLE_SRC_PATH} rsc_table)
+endif()

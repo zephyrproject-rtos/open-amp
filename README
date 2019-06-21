@@ -9,6 +9,8 @@ Status:
 
    When we import open-amp we removed the apps dir to reduce the amount of
    code imported.
+   We also add resource table source code that can be used to declare a resource
+   table in project.
 Purpose:
    IPC layer that implements rpmsg communication between cores.
 

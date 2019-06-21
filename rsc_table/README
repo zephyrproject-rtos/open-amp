@@ -1,0 +1,21 @@
+
+Description:
+
+In addition to the standard ELF segments, most remote processors would
+also include a special section which we call "the resource table".
+
+The resource table contains system resources that the remote processor
+requires before it should be powered on, such as allocation of physically
+contiguous memory, or iommu mapping of certain on-chip peripherals.
+
+In addition to system resources, the resource table may also contain
+resource entries that publish the existence of supported features
+or configurations by the remote processor, such as trace buffers and
+supported virtio devices (and their configurations).
+
+Dependencies:
+  to be compliant with Linux kernel OS the resource table must be linked in a
+  specific section named ".resource_table".
+
+Related documentation:
+  https://www.kernel.org/doc/Documentation/remoteproc.txt
