@@ -4,11 +4,10 @@ OpenAMP
 Origin:
    https://github.com/OpenAMP/open-amp
 
-Status:
-   db6de3ffb0a43b50e3a10af23a3d80eebd6db008
-
+Import instructions:
    When we import open-amp we removed the apps dir to reduce the amount of
    code imported.
+
 Purpose:
    IPC layer that implements rpmsg communication between cores.
 
