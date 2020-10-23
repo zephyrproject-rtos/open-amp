@@ -25,22 +25,23 @@ extern "C" {
 #endif
 
 /* Configurable parameters */
-#define RPMSG_NAME_SIZE		(32)
-#define RPMSG_ADDR_BMP_SIZE	(128)
+#define RPMSG_NAME_SIZE			(32)
+#define RPMSG_ADDR_BMP_SIZE		(128)
 
-#define RPMSG_NS_EPT_ADDR	(0x35)
-#define RPMSG_ADDR_ANY		0xFFFFFFFF
+#define RPMSG_NS_EPT_ADDR		(0x35)
+#define RPMSG_RESERVED_ADDRESSES	(1024)
+#define RPMSG_ADDR_ANY			0xFFFFFFFF
 
 /* Error macros. */
-#define RPMSG_SUCCESS		0
-#define RPMSG_ERROR_BASE	-2000
-#define RPMSG_ERR_NO_MEM	(RPMSG_ERROR_BASE - 1)
-#define RPMSG_ERR_NO_BUFF	(RPMSG_ERROR_BASE - 2)
-#define RPMSG_ERR_PARAM		(RPMSG_ERROR_BASE - 3)
-#define RPMSG_ERR_DEV_STATE	(RPMSG_ERROR_BASE - 4)
-#define RPMSG_ERR_BUFF_SIZE	(RPMSG_ERROR_BASE - 5)
-#define RPMSG_ERR_INIT		(RPMSG_ERROR_BASE - 6)
-#define RPMSG_ERR_ADDR		(RPMSG_ERROR_BASE - 7)
+#define RPMSG_SUCCESS			0
+#define RPMSG_ERROR_BASE		-2000
+#define RPMSG_ERR_NO_MEM		(RPMSG_ERROR_BASE - 1)
+#define RPMSG_ERR_NO_BUFF		(RPMSG_ERROR_BASE - 2)
+#define RPMSG_ERR_PARAM			(RPMSG_ERROR_BASE - 3)
+#define RPMSG_ERR_DEV_STATE		(RPMSG_ERROR_BASE - 4)
+#define RPMSG_ERR_BUFF_SIZE		(RPMSG_ERROR_BASE - 5)
+#define RPMSG_ERR_INIT			(RPMSG_ERROR_BASE - 6)
+#define RPMSG_ERR_ADDR			(RPMSG_ERROR_BASE - 7)
 
 struct rpmsg_endpoint;
 struct rpmsg_device;
@@ -146,8 +147,6 @@ int rpmsg_send_offchannel_raw(struct rpmsg_endpoint *ept, uint32_t src,
 static inline int rpmsg_send(struct rpmsg_endpoint *ept, const void *data,
 			     int len)
 {
-	if (ept->dest_addr == RPMSG_ADDR_ANY)
-		return RPMSG_ERR_ADDR;
 	return rpmsg_send_offchannel_raw(ept, ept->addr, ept->dest_addr, data,
 					 len, true);
 }
@@ -216,8 +215,6 @@ static inline int rpmsg_send_offchannel(struct rpmsg_endpoint *ept,
 static inline int rpmsg_trysend(struct rpmsg_endpoint *ept, const void *data,
 				int len)
 {
-	if (ept->dest_addr == RPMSG_ADDR_ANY)
-		return RPMSG_ERR_ADDR;
 	return rpmsg_send_offchannel_raw(ept, ept->addr, ept->dest_addr, data,
 					 len, false);
 }
@@ -274,6 +271,8 @@ static inline int rpmsg_trysend_offchannel(struct rpmsg_endpoint *ept,
  * Initialize an RPMsg endpoint with a name, source address,
  * remoteproc address, endpoint callback, and destroy endpoint callback.
  *
+ * API deprecated since release v2020.10
+ *
  * @ept: pointer to rpmsg endpoint
  * @name: service name associated to the endpoint
  * @src: local address of the endpoint
@@ -282,11 +281,11 @@ static inline int rpmsg_trysend_offchannel(struct rpmsg_endpoint *ept,
  * @ns_unbind_cb: end point service unbind callback, called when remote ept is
  *                destroyed.
  */
-static inline void rpmsg_init_ept(struct rpmsg_endpoint *ept,
-				  const char *name,
-				  uint32_t src, uint32_t dest,
-				  rpmsg_ept_cb cb,
-				  rpmsg_ns_unbind_cb ns_unbind_cb)
+__deprecated static inline void rpmsg_init_ept(struct rpmsg_endpoint *ept,
+					       const char *name,
+					       uint32_t src, uint32_t dest,
+					       rpmsg_ept_cb cb,
+					       rpmsg_ns_unbind_cb ns_unbind_cb)
 {
 	strncpy(ept->name, name ? name : "", sizeof(ept->name));
 	ept->addr = src;
@@ -346,8 +345,7 @@ void rpmsg_destroy_ept(struct rpmsg_endpoint *ept);
  */
 static inline unsigned int is_rpmsg_ept_ready(struct rpmsg_endpoint *ept)
 {
-	return (ept->dest_addr != RPMSG_ADDR_ANY) &&
-		(ept->addr != RPMSG_ADDR_ANY);
+	return ept && ept->rdev && ept->dest_addr != RPMSG_ADDR_ANY;
 }
 
 #if defined __cplusplus

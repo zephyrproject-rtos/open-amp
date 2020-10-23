@@ -29,7 +29,7 @@ static uint32_t rpmsg_get_address(unsigned long *bitmap, int size)
 
 	nextbit = metal_bitmap_next_clear_bit(bitmap, 0, size);
 	if (nextbit < (uint32_t)size) {
-		addr = nextbit;
+		addr = RPMSG_RESERVED_ADDRESSES + nextbit;
 		metal_bitmap_set_bit(bitmap, nextbit);
 	}
 
@@ -48,7 +48,8 @@ static uint32_t rpmsg_get_address(unsigned long *bitmap, int size)
 static void rpmsg_release_address(unsigned long *bitmap, int size,
 				  int addr)
 {
-	if (addr < size)
+	addr -= RPMSG_RESERVED_ADDRESSES;
+	if (addr >= 0 && addr < size)
 		metal_bitmap_clear_bit(bitmap, addr);
 }
 
@@ -65,7 +66,8 @@ static void rpmsg_release_address(unsigned long *bitmap, int size,
  */
 static int rpmsg_is_address_set(unsigned long *bitmap, int size, int addr)
 {
-	if (addr < size)
+	addr -= RPMSG_RESERVED_ADDRESSES;
+	if (addr >= 0 && addr < size)
 		return metal_bitmap_is_bit_set(bitmap, addr);
 	else
 		return RPMSG_ERR_PARAM;
@@ -84,7 +86,8 @@ static int rpmsg_is_address_set(unsigned long *bitmap, int size, int addr)
  */
 static int rpmsg_set_address(unsigned long *bitmap, int size, int addr)
 {
-	if (addr < size) {
+	addr -= RPMSG_RESERVED_ADDRESSES;
+	if (addr >= 0 && addr < size) {
 		metal_bitmap_set_bit(bitmap, addr);
 		return RPMSG_SUCCESS;
 	} else {
@@ -176,17 +179,15 @@ struct rpmsg_endpoint *rpmsg_get_endpoint(struct rpmsg_device *rdev,
 
 static void rpmsg_unregister_endpoint(struct rpmsg_endpoint *ept)
 {
-	struct rpmsg_device *rdev;
+	struct rpmsg_device *rdev = ept->rdev;
 
-	if (!ept)
-		return;
-
-	rdev = ept->rdev;
-
+	metal_mutex_acquire(&rdev->lock);
 	if (ept->addr != RPMSG_ADDR_ANY)
 		rpmsg_release_address(rdev->bitmap, RPMSG_ADDR_BMP_SIZE,
 				      ept->addr);
 	metal_list_del(&ept->node);
+	ept->rdev = NULL;
+	metal_mutex_release(&rdev->lock);
 }
 
 void rpmsg_register_endpoint(struct rpmsg_device *rdev,
@@ -207,7 +208,13 @@ int rpmsg_create_ept(struct rpmsg_endpoint *ept, struct rpmsg_device *rdev,
 		return RPMSG_ERR_PARAM;
 
 	metal_mutex_acquire(&rdev->lock);
-	if (src != RPMSG_ADDR_ANY) {
+	if (src == RPMSG_ADDR_ANY) {
+		addr = rpmsg_get_address(rdev->bitmap, RPMSG_ADDR_BMP_SIZE);
+		if (addr == RPMSG_ADDR_ANY) {
+			status = RPMSG_ERR_ADDR;
+			goto ret_status;
+		}
+	} else if (src >= RPMSG_RESERVED_ADDRESSES) {
 		status = rpmsg_is_address_set(rdev->bitmap,
 					      RPMSG_ADDR_BMP_SIZE, src);
 		if (!status) {
@@ -215,26 +222,30 @@ int rpmsg_create_ept(struct rpmsg_endpoint *ept, struct rpmsg_device *rdev,
 			rpmsg_set_address(rdev->bitmap, RPMSG_ADDR_BMP_SIZE,
 					  src);
 		} else if (status > 0) {
-			status = RPMSG_SUCCESS;
+			status = RPMSG_ERR_ADDR;
 			goto ret_status;
 		} else {
 			goto ret_status;
 		}
 	} else {
-		addr = rpmsg_get_address(rdev->bitmap, RPMSG_ADDR_BMP_SIZE);
+		/* Skip check the address duplication in 0-1023:
+		 * 1.Trust the author of predefined service
+		 * 2.Simplify the tracking implementation
+		 */
 	}
 
-	rpmsg_init_ept(ept, name, addr, dest, cb, unbind_cb);
+	rpmsg_initialize_ept(ept, name, addr, dest, cb, unbind_cb);
 	rpmsg_register_endpoint(rdev, ept);
+	metal_mutex_release(&rdev->lock);
 
-	if (rdev->support_ns && ept->dest_addr == RPMSG_ADDR_ANY) {
-		/* Send NS announcement to remote processor */
-		metal_mutex_release(&rdev->lock);
+	/* Send NS announcement to remote processor */
+	if (ept->name[0] && rdev->support_ns &&
+	    ept->dest_addr == RPMSG_ADDR_ANY)
 		status = rpmsg_send_ns_message(ept, RPMSG_NS_CREATE);
-		metal_mutex_acquire(&rdev->lock);
-		if (status)
-			rpmsg_unregister_endpoint(ept);
-	}
+
+	if (status)
+		rpmsg_unregister_endpoint(ept);
+	return status;
 
 ret_status:
 	metal_mutex_release(&rdev->lock);
@@ -257,9 +268,11 @@ void rpmsg_destroy_ept(struct rpmsg_endpoint *ept)
 		return;
 
 	rdev = ept->rdev;
-	if (ept->name[0] && rdev->support_ns && ept->addr != RPMSG_NS_EPT_ADDR)
+	if (!rdev)
+		return;
+
+	if (ept->name[0] && rdev->support_ns &&
+	    ept->addr >= RPMSG_RESERVED_ADDRESSES)
 		(void)rpmsg_send_ns_message(ept, RPMSG_NS_DESTROY);
-	metal_mutex_acquire(&rdev->lock);
 	rpmsg_unregister_endpoint(ept);
-	metal_mutex_release(&rdev->lock);
 }
