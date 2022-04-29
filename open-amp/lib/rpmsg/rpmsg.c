@@ -217,9 +217,6 @@ struct rpmsg_endpoint *rpmsg_get_endpoint(struct rpmsg_device *rdev,
 		/* try to get by local address only */
 		if (addr != RPMSG_ADDR_ANY && ept->addr == addr)
 			return ept;
-		/* try to find match on local end remote address */
-		if (addr == ept->addr && dest_addr == ept->dest_addr)
-			return ept;
 		/* else use name service and destination address */
 		if (name)
 			name_match = !strncmp(ept->name, name,
@@ -250,8 +247,17 @@ static void rpmsg_unregister_endpoint(struct rpmsg_endpoint *ept)
 }
 
 void rpmsg_register_endpoint(struct rpmsg_device *rdev,
-			     struct rpmsg_endpoint *ept)
+			     struct rpmsg_endpoint *ept,
+			     const char *name,
+			     uint32_t src, uint32_t dest,
+			     rpmsg_ept_cb cb,
+			     rpmsg_ns_unbind_cb ns_unbind_cb)
 {
+	strncpy(ept->name, name ? name : "", sizeof(ept->name));
+	ept->addr = src;
+	ept->dest_addr = dest;
+	ept->cb = cb;
+	ept->ns_unbind_cb = ns_unbind_cb;
 	ept->rdev = rdev;
 	metal_list_add_tail(&rdev->endpoints, &ept->node);
 }
@@ -293,8 +299,7 @@ int rpmsg_create_ept(struct rpmsg_endpoint *ept, struct rpmsg_device *rdev,
 		 */
 	}
 
-	rpmsg_initialize_ept(ept, name, addr, dest, cb, unbind_cb);
-	rpmsg_register_endpoint(rdev, ept);
+	rpmsg_register_endpoint(rdev, ept, name, addr, dest, cb, unbind_cb);
 	metal_mutex_release(&rdev->lock);
 
 	/* Send NS announcement to remote processor */
