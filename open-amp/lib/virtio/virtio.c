@@ -26,6 +26,17 @@ static const struct virtio_ident {
 	VIRTIO_ID_IOMEMORY, "IOMemory"}, {
 	VIRTIO_ID_SCSI, "SCSI"}, {
 	VIRTIO_ID_9P, "9P Transport"}, {
+	VIRTIO_ID_MAC80211_WLAN, "MAC80211 WLAN"}, {
+	VIRTIO_ID_RPROC_SERIAL, "Remoteproc Serial"}, {
+	VIRTIO_ID_GPU, "GPU"}, {
+	VIRTIO_ID_INPUT, "Input"}, {
+	VIRTIO_ID_VSOCK, "Vsock Transport"}, {
+	VIRTIO_ID_SOUND, "Sound"}, {
+	VIRTIO_ID_FS, "File System"}, {
+	VIRTIO_ID_MAC80211_HWSIM, "MAC80211 HWSIM"}, {
+	VIRTIO_ID_I2C_ADAPTER, "I2C Adapter"}, {
+	VIRTIO_ID_BT, "Bluetooth"}, {
+	VIRTIO_ID_GPIO, "GPIO" }, {
 	0, NULL}
 };
 
@@ -92,6 +103,14 @@ int virtio_create_virtqueues(struct virtio_device *vdev, unsigned int flags,
 	unsigned int num_vrings, i;
 	int ret;
 	(void)flags;
+
+	if (!vdev)
+		return -EINVAL;
+
+	if (vdev->func && vdev->func->create_virtqueues) {
+		return vdev->func->create_virtqueues(vdev, flags, nvqs,
+						     names, callbacks);
+	}
 
 	num_vrings = vdev->vrings_num;
 	if (nvqs > num_vrings)
