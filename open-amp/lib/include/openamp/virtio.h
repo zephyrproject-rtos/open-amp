@@ -95,9 +95,16 @@ __deprecated static inline int deprecated_virtio_dev_slave(void)
 #warning "VIRTIO_SLAVE_ONLY is deprecated, please use VIRTIO_DEVICE_ONLY"
 #endif
 
+/** @brief Virtio device identifier. */
 struct virtio_device_id {
+	/** Virtio subsystem device ID. */
 	uint32_t device;
+
+	/** Virtio subsystem vendor ID. */
 	uint32_t vendor;
+
+	/** Virtio subsystem device version. */
+	uint32_t version;
 };
 
 /*
@@ -120,102 +127,170 @@ struct virtio_device_id {
 #define VIRTIO_TRANSPORT_F_START      28
 #define VIRTIO_TRANSPORT_F_END        32
 
+#ifdef VIRTIO_DEBUG
+#include <metal/log.h>
+
+#define VIRTIO_ASSERT(_exp, _msg) do { \
+		int exp = (_exp); \
+		if (!(exp)) { \
+			metal_log(METAL_LOG_EMERGENCY, \
+				  "FATAL: %s - " _msg, __func__); \
+			metal_assert(exp); \
+		} \
+	} while (0)
+#else
+#define VIRTIO_ASSERT(_exp, _msg) metal_assert(_exp)
+#endif /* VIRTIO_DEBUG */
+
+#define VIRTIO_MMIO_VRING_ALIGNMENT           4096
+
 typedef void (*virtio_dev_reset_cb)(struct virtio_device *vdev);
 
 struct virtio_dispatch;
 
+/** @brief Device features. */
 struct virtio_feature_desc {
+	/** Unique feature ID, defined in the virtio specification. */
 	uint32_t vfd_val;
+
+	/** Name of the feature (for debug). */
 	const char *vfd_str;
 };
 
-/**
- * struct virtio_vring_info
- * @vq virtio queue
- * @info vring alloc info
- * @notifyid vring notify id
- * @io metal I/O region of the vring memory, can be NULL
- */
+/** @brief Virtio vring data structure */
 struct virtio_vring_info {
+	/** Virtio queue */
 	struct virtqueue *vq;
+
+	/** Vring alloc info */
 	struct vring_alloc_info info;
+
+	/** Vring notify id */
 	uint32_t notifyid;
+
+	/** Metal I/O region of the vring memory, can be NULL */
 	struct metal_io_region *io;
 };
 
-/*
- * Structure definition for virtio devices for use by the
- * applications/drivers
- */
-
+/** @brief Structure definition for virtio devices for use by the applications/drivers */
 struct virtio_device {
-	uint32_t notifyid; /**< unique position on the virtio bus */
-	struct virtio_device_id id; /**< the device type identification
-				      *  (used to match it with a driver
-				      */
-	uint64_t features; /**< the features supported by both ends. */
-	unsigned int role; /**< if it is virtio backend or front end. */
-	virtio_dev_reset_cb reset_cb; /**< user registered device callback */
-	const struct virtio_dispatch *func; /**< Virtio dispatch table */
-	void *priv; /**< TODO: remove pointer to virtio_device private data */
-	unsigned int vrings_num; /**< number of vrings */
+	/** Unique position on the virtio bus */
+	uint32_t notifyid;
+
+	/** The device type identification used to match it with a driver */
+	struct virtio_device_id id;
+
+	/** The features supported by both ends. */
+	uint64_t features;
+
+	/** If it is virtio backend or front end. */
+	unsigned int role;
+
+	/** User-registered device callback */
+	virtio_dev_reset_cb reset_cb;
+
+	/** Virtio dispatch table */
+	const struct virtio_dispatch *func;
+
+	/** Private data */
+	void *priv;
+
+	/** Number of vrings */
+	unsigned int vrings_num;
+
+	/** Pointer to the virtio vring structure */
 	struct virtio_vring_info *vrings_info;
 };
 
 /*
  * Helper functions.
  */
+
+/**
+ * @brief Get the name of a virtio device.
+ *
+ * @param devid Id of the device.
+ *
+ * @return pointer to the device name string if found, otherwise null.
+ */
 const char *virtio_dev_name(uint16_t devid);
 void virtio_describe(struct virtio_device *dev, const char *msg,
 		     uint32_t features,
 		     struct virtio_feature_desc *feature_desc);
 
-/*
- * Functions for virtio device configuration as defined in Rusty Russell's
- * paper.
- * Drivers are expected to implement these functions in their respective codes.
+/**
+ * @brief Virtio device dispatcher functions.
+ *
+ * Functions for virtio device configuration as defined in Rusty Russell's paper.
+ * The virtio transport layers are expected to implement these functions in their respective codes.
  */
 
 struct virtio_dispatch {
+	/** Create virtio queue instances. */
 	int (*create_virtqueues)(struct virtio_device *vdev,
 				 unsigned int flags,
 				 unsigned int nvqs, const char *names[],
-				 vq_callback callbacks[]);
+				 vq_callback callbacks[],
+				 void *callback_args[]);
+
+	/** Delete virtio queue instances. */
 	void (*delete_virtqueues)(struct virtio_device *vdev);
+
+	/** Get the status of the virtio device. */
 	uint8_t (*get_status)(struct virtio_device *dev);
+
+	/** Set the status of the virtio device. */
 	void (*set_status)(struct virtio_device *dev, uint8_t status);
+
+	/** Get the feature exposed by the virtio device. */
 	uint32_t (*get_features)(struct virtio_device *dev);
+
+	/** Set the supported feature (virtio driver only). */
 	void (*set_features)(struct virtio_device *dev, uint32_t feature);
+
+	/**
+	 * Set the supported feature negotiate between the \ref features parameter and features
+	 * supported by the device (virtio driver only).
+	 */
 	uint32_t (*negotiate_features)(struct virtio_device *dev,
 				       uint32_t features);
 
-	/*
-	 * Read/write a variable amount from the device specific (ie, network)
-	 * configuration region. This region is encoded in the same endian as
-	 * the guest.
+	/**
+	 * Read a variable amount from the device specific (ie, network)
+	 * configuration region.
 	 */
 	void (*read_config)(struct virtio_device *dev, uint32_t offset,
 			    void *dst, int length);
+
+	/**
+	 * Write a variable amount from the device specific (ie, network)
+	 * configuration region.
+	 */
 	void (*write_config)(struct virtio_device *dev, uint32_t offset,
 			     void *src, int length);
+
+	/** Request a reset of the virtio device. */
 	void (*reset_device)(struct virtio_device *dev);
+
+	/** Notify the other side that a virtio vring as been updated. */
 	void (*notify)(struct virtqueue *vq);
 };
 
 /**
  * @brief Create the virtio device virtqueue.
  *
- * @param vdev		Pointer to virtio device structure.
- * @param flags		Create flag.
- * @param nvqs		The virtqueue number.
- * @param names		Virtqueue names.
- * @param callbacks	Virtqueue callback functions.
+ * @param vdev			Pointer to virtio device structure.
+ * @param flags			Create flag.
+ * @param nvqs			The virtqueue number.
+ * @param names			Virtqueue names.
+ * @param callbacks		Virtqueue callback functions.
+ * @param callback_args	Virtqueue callback function arguments.
  *
  * @return 0 on success, otherwise error code.
  */
 int virtio_create_virtqueues(struct virtio_device *vdev, unsigned int flags,
 			     unsigned int nvqs, const char *names[],
-			     vq_callback callbacks[]);
+			     vq_callback callbacks[], void *callback_args[]);
 
 /**
  * @brief Delete the virtio device virtqueue.
@@ -234,6 +309,20 @@ static inline int virtio_delete_virtqueues(struct virtio_device *vdev)
 
 	vdev->func->delete_virtqueues(vdev);
 	return 0;
+}
+
+/**
+ * @brief Get device ID.
+ *
+ * @param dev Pointer to device structure.
+ *
+ * @return Device ID value.
+ */
+static inline uint32_t virtio_get_devid(const struct virtio_device *vdev)
+{
+	if (!vdev)
+		return 0;
+	return vdev->id.device;
 }
 
 /**
