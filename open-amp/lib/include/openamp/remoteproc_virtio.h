@@ -26,31 +26,37 @@ extern "C" {
 
 /* cache invalidation helpers for resource table */
 #ifdef VIRTIO_CACHED_RSC_TABLE
-#define RSC_TABLE_FLUSH(x, s)		metal_cache_flush(x, s)
-#define RSC_TABLE_INVALIDATE(x, s)	metal_cache_invalidate(x, s)
+#warning "VIRTIO_CACHED_RSC_TABLE is deprecated, please use VIRTIO_USE_DCACHE"
+#endif
+#if defined(VIRTIO_CACHED_RSC_TABLE) || defined(VIRTIO_USE_DCACHE)
+#define RSC_TABLE_FLUSH(x, s)		CACHE_FLUSH(x, s)
+#define RSC_TABLE_INVALIDATE(x, s)	CACHE_INVALIDATE(x, s)
 #else
 #define RSC_TABLE_FLUSH(x, s)		do { } while (0)
 #define RSC_TABLE_INVALIDATE(x, s)	do { } while (0)
-#endif /* VIRTIO_CACHED_RSC_TABLE */
+#endif /* VIRTIO_CACHED_RSC_TABLE || VIRTIO_USE_DCACHE */
 
 /* define vdev notification function user should implement */
 typedef int (*rpvdev_notify_func)(void *priv, uint32_t id);
 
-/**
- * struct remoteproc_virtio
- * @priv pointer to private data
- * @vdev_rsc address of vdev resource
- * @vdev_rsc_io metal I/O region of vdev_info, can be NULL
- * @notify notification function
- * @vdev virtio device
- * @node list node
- */
+/** @brief Virtio structure for remoteproc instance */
 struct remoteproc_virtio {
+	/** Pointer to private data */
 	void *priv;
+
+	/** Address of vdev resource */
 	void *vdev_rsc;
+
+	/** Metal I/O region of vdev_info, can be NULL */
 	struct metal_io_region *vdev_rsc_io;
+
+	/** Notification function */
 	rpvdev_notify_func notify;
+
+	/** Virtio device */
 	struct virtio_device vdev;
+
+	/** List node */
 	struct metal_list node;
 };
 
