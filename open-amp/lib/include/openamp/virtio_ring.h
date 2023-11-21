@@ -39,7 +39,7 @@ extern "C" {
  * The descriptor table refers to the buffers the driver is using for the
  * device. addr is a physical address, and the buffers can be chained via \ref next.
  * Each descriptor describes a buffer which is read-only for the device
- * (ìdevice-readableî) or write-only for the device (ìdevice-writableî), but a
+ * (‚Äúdevice-readable‚Äù) or write-only for the device (‚Äúdevice-writable‚Äù), but a
  * chain of descriptors can contain both device-readable and device-writable
  * buffers.
  */
