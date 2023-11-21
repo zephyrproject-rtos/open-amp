@@ -214,9 +214,10 @@ struct virtio_device {
  * @return pointer to the device name string if found, otherwise null.
  */
 const char *virtio_dev_name(uint16_t devid);
-void virtio_describe(struct virtio_device *dev, const char *msg,
-		     uint32_t features,
-		     struct virtio_feature_desc *feature_desc);
+
+__deprecated void virtio_describe(struct virtio_device *dev, const char *msg,
+				  uint32_t features,
+				  struct virtio_feature_desc *feature_desc);
 
 /**
  * @brief Virtio device dispatcher functions.
@@ -297,18 +298,13 @@ int virtio_create_virtqueues(struct virtio_device *vdev, unsigned int flags,
  *
  * @param vdev	Pointer to virtio device structure.
  *
- * @return 0 on success, otherwise error code.
  */
-static inline int virtio_delete_virtqueues(struct virtio_device *vdev)
+static inline void virtio_delete_virtqueues(struct virtio_device *vdev)
 {
-	if (!vdev)
-		return -EINVAL;
-
-	if (!vdev->func || !vdev->func->delete_virtqueues)
-		return -ENXIO;
+	if (!vdev || !vdev->func || !vdev->func->delete_virtqueues)
+		return;
 
 	vdev->func->delete_virtqueues(vdev);
-	return 0;
 }
 
 /**
