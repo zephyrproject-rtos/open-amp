@@ -35,11 +35,12 @@ size_t
 strlcpy(char *dst, const char *src, size_t size)
 {
 	size_t nleft = size;
+	const char *s= src;
 
 	/* Copy as many bytes as will fit. */
 	if (nleft != 0) {
 		while (--nleft != 0) {
-			*dst = *src++;
+			*dst = *s++;
 			if (*dst++ == '\0')
 				break;
 		}
@@ -49,5 +50,5 @@ strlcpy(char *dst, const char *src, size_t size)
 	if (nleft == 0 && size != 0)
 		*dst = '\0';		/* NUL-terminate dst */
 
-	return strlen(src);
+	return (s - src - 1);
 }
