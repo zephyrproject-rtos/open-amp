@@ -7,7 +7,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-#include <internal/string.h>
+#include <internal/utilities.h>
 #include <openamp/rpmsg.h>
 #include <metal/alloc.h>
 
@@ -142,7 +142,7 @@ int rpmsg_send_ns_message(struct rpmsg_endpoint *ept, unsigned long flags)
 
 	ns_msg.flags = flags;
 	ns_msg.addr = ept->addr;
-	(void)strlcpy(ns_msg.name, ept->name, sizeof(ns_msg.name));
+	(void)safe_strcpy(ns_msg.name, sizeof(ns_msg.name), ept->name, sizeof(ept->name));
 	ret = rpmsg_send_offchannel_raw(ept, ept->addr,
 					RPMSG_NS_EPT_ADDR,
 					&ns_msg, sizeof(ns_msg), true);
@@ -306,7 +306,11 @@ void rpmsg_register_endpoint(struct rpmsg_device *rdev,
 			     rpmsg_ept_cb cb,
 			     rpmsg_ns_unbind_cb ns_unbind_cb, void *priv)
 {
-	(void)strlcpy(ept->name, name ? name : "", sizeof(ept->name));
+	if (name)
+		(void)safe_strcpy(ept->name, sizeof(ept->name), name, RPMSG_NAME_SIZE);
+	else
+		ept->name[0] = 0;
+
 	ept->refcnt = 1;
 	ept->addr = src;
 	ept->dest_addr = dest;

@@ -10,6 +10,7 @@
 
 #include <metal/alloc.h>
 #include <metal/sleep.h>
+#include <metal/sys.h>
 #include <metal/utilities.h>
 #include <openamp/rpmsg_virtio.h>
 #include <openamp/virtqueue.h>
@@ -271,8 +272,7 @@ static int rpmsg_virtio_wait_remote_ready(struct rpmsg_virtio_device *rvdev)
 		} else if (status & VIRTIO_CONFIG_STATUS_DRIVER_OK) {
 			return 0;
 		}
-		/* TODO: clarify metal_cpu_yield usage*/
-		metal_cpu_yield();
+		metal_yield();
 	}
 }
 
@@ -321,8 +321,6 @@ static bool rpmsg_virtio_release_rx_buffer_nolock(struct rpmsg_virtio_device *rv
 	/* Return buffer on virtqueue. */
 	len = virtqueue_get_buffer_length(rvdev->rvq, idx);
 	rpmsg_virtio_return_buffer(rvdev, rp_hdr, len, idx);
-	/* Tell peer we returned an rx buffer */
-	virtqueue_kick(rvdev->rvq);
 
 	return true;
 }
@@ -337,8 +335,11 @@ static void rpmsg_virtio_release_rx_buffer(struct rpmsg_device *rdev,
 	rp_hdr = RPMSG_LOCATE_HDR(rxbuf);
 
 	metal_mutex_acquire(&rdev->lock);
-	if (rpmsg_virtio_buf_held_dec_test(rp_hdr))
+	if (rpmsg_virtio_buf_held_dec_test(rp_hdr)) {
 		rpmsg_virtio_release_rx_buffer_nolock(rvdev, rp_hdr);
+		/* Tell peer we returned an rx buffer */
+		virtqueue_kick(rvdev->rvq);
+	}
 	metal_mutex_release(&rdev->lock);
 }
 
@@ -393,7 +394,7 @@ static void *rpmsg_virtio_get_tx_payload_buffer(struct rpmsg_device *rdev,
 		if (status == RPMSG_EOPNOTSUPP) {
 			metal_sleep_usec(RPMSG_TICKS_PER_INTERVAL);
 			tick_count--;
-		} else if (status == RPMSG_SUCCESS) {
+		} else if (status != RPMSG_SUCCESS) {
 			break;
 		}
 	}
@@ -560,6 +561,7 @@ static void rpmsg_virtio_rx_callback(struct virtqueue *vq)
 	struct rpmsg_device *rdev = &rvdev->rdev;
 	struct rpmsg_endpoint *ept;
 	struct rpmsg_hdr *rp_hdr;
+	bool release = false;
 	uint32_t len;
 	uint16_t idx;
 	int status;
@@ -568,16 +570,19 @@ static void rpmsg_virtio_rx_callback(struct virtqueue *vq)
 		/* Process the received data from remote node */
 		metal_mutex_acquire(&rdev->lock);
 		rp_hdr = rpmsg_virtio_get_rx_buffer(rvdev, &len, &idx);
-		metal_mutex_release(&rdev->lock);
 
 		/* No more filled rx buffers */
-		if (!rp_hdr)
+		if (!rp_hdr) {
+			if (VIRTIO_ENABLED(VQ_RX_EMPTY_NOTIFY) && release)
+				/* Tell peer we returned some rx buffer */
+				virtqueue_kick(rvdev->rvq);
+			metal_mutex_release(&rdev->lock);
 			break;
+		}
 
 		rp_hdr->reserved = idx;
 
 		/* Get the channel node from the remote device channels list. */
-		metal_mutex_acquire(&rdev->lock);
 		ept = rpmsg_get_ept_from_addr(rdev, rp_hdr->dst);
 		rpmsg_ept_incref(ept);
 		RPMSG_BUF_HELD_INC(rp_hdr);
@@ -600,8 +605,15 @@ static void rpmsg_virtio_rx_callback(struct virtqueue *vq)
 
 		metal_mutex_acquire(&rdev->lock);
 		rpmsg_ept_decref(ept);
-		if (rpmsg_virtio_buf_held_dec_test(rp_hdr))
+		if (rpmsg_virtio_buf_held_dec_test(rp_hdr)) {
 			rpmsg_virtio_release_rx_buffer_nolock(rvdev, rp_hdr);
+			if (VIRTIO_ENABLED(VQ_RX_EMPTY_NOTIFY))
+				/* Kick will be sent only when last buffer is released */
+				release = true;
+			else
+				/* Tell peer we returned an rx buffer */
+				virtqueue_kick(rvdev->rvq);
+		}
 		metal_mutex_release(&rdev->lock);
 	}
 }
@@ -806,7 +818,7 @@ int rpmsg_init_vdev_with_config(struct rpmsg_virtio_device *rvdev,
 	rdev->ops.get_rx_buffer_size = rpmsg_virtio_get_rx_buffer_size;
 	rdev->ops.get_tx_buffer_size = rpmsg_virtio_get_tx_buffer_size;
 
-	if (VIRTIO_ROLE_IS_DRIVER(rvdev->vdev)) {
+	if (VIRTIO_ROLE_IS_DRIVER(vdev)) {
 		/*
 		 * The virtio configuration contains only options applicable to
 		 * a virtio driver, implying rpmsg host role.
@@ -817,19 +829,19 @@ int rpmsg_init_vdev_with_config(struct rpmsg_virtio_device *rvdev,
 		rvdev->config = *config;
 	}
 
-	if (VIRTIO_ROLE_IS_DEVICE(rvdev->vdev)) {
+	if (VIRTIO_ROLE_IS_DEVICE(vdev)) {
 		/* wait synchro with the host */
 		status = rpmsg_virtio_wait_remote_ready(rvdev);
 		if (status)
 			return status;
 	}
 
-	status = virtio_get_features(rvdev->vdev, &features);
+	status = virtio_get_features(vdev, &features);
 	if (status)
 		return status;
 	rdev->support_ns = !!(features & (1 << VIRTIO_RPMSG_F_NS));
 
-	if (VIRTIO_ROLE_IS_DRIVER(rvdev->vdev)) {
+	if (VIRTIO_ROLE_IS_DRIVER(vdev)) {
 		/*
 		 * Since device is RPMSG Remote so we need to manage the
 		 * shared buffers. Create shared memory pool to handle buffers.
@@ -846,7 +858,7 @@ int rpmsg_init_vdev_with_config(struct rpmsg_virtio_device *rvdev,
 		callback[1] = rpmsg_virtio_tx_callback;
 	}
 
-	if (VIRTIO_ROLE_IS_DEVICE(rvdev->vdev)) {
+	if (VIRTIO_ROLE_IS_DEVICE(vdev)) {
 		vq_names[0] = "tx_vq";
 		vq_names[1] = "rx_vq";
 		callback[0] = rpmsg_virtio_tx_callback;
@@ -857,18 +869,18 @@ int rpmsg_init_vdev_with_config(struct rpmsg_virtio_device *rvdev,
 	metal_list_init(&rvdev->reclaimer);
 
 	/* Create virtqueues for remote device */
-	status = virtio_create_virtqueues(rvdev->vdev, 0, RPMSG_NUM_VRINGS,
+	status = virtio_create_virtqueues(vdev, 0, RPMSG_NUM_VRINGS,
 					  vq_names, callback, NULL);
 	if (status != RPMSG_SUCCESS)
 		return status;
 
 	/* Create virtqueue success, assign back the virtqueue */
-	if (VIRTIO_ROLE_IS_DRIVER(rvdev->vdev)) {
+	if (VIRTIO_ROLE_IS_DRIVER(vdev)) {
 		rvdev->rvq  = vdev->vrings_info[0].vq;
 		rvdev->svq  = vdev->vrings_info[1].vq;
 	}
 
-	if (VIRTIO_ROLE_IS_DEVICE(rvdev->vdev)) {
+	if (VIRTIO_ROLE_IS_DEVICE(vdev)) {
 		rvdev->rvq  = vdev->vrings_info[1].vq;
 		rvdev->svq  = vdev->vrings_info[0].vq;
 	}
@@ -887,7 +899,7 @@ int rpmsg_init_vdev_with_config(struct rpmsg_virtio_device *rvdev,
 		vq->shm_io = shm_io;
 	}
 
-	if (VIRTIO_ROLE_IS_DRIVER(rvdev->vdev)) {
+	if (VIRTIO_ROLE_IS_DRIVER(vdev)) {
 		struct virtqueue_buf vqbuf;
 		unsigned int idx;
 		void *buffer;
@@ -932,8 +944,8 @@ int rpmsg_init_vdev_with_config(struct rpmsg_virtio_device *rvdev,
 				     rpmsg_virtio_ns_callback, NULL, rvdev);
 	}
 
-	if (VIRTIO_ROLE_IS_DRIVER(rvdev->vdev)) {
-		status = virtio_set_status(rvdev->vdev, VIRTIO_CONFIG_STATUS_DRIVER_OK);
+	if (VIRTIO_ROLE_IS_DRIVER(vdev)) {
+		status = virtio_set_status(vdev, VIRTIO_CONFIG_STATUS_DRIVER_OK);
 		if (status)
 			goto err;
 	}
@@ -941,7 +953,7 @@ int rpmsg_init_vdev_with_config(struct rpmsg_virtio_device *rvdev,
 	return RPMSG_SUCCESS;
 
 err:
-	virtio_delete_virtqueues(rvdev->vdev);
+	virtio_delete_virtqueues(vdev);
 	return status;
 }
 

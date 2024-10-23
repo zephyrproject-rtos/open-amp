@@ -1,1 +1,1 @@
-collect (PROJECT_LIB_SOURCES string.c)
+collect (PROJECT_LIB_SOURCES utilities.c)
