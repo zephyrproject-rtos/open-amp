@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-#include <internal/string.h>
+#include <internal/utilities.h>
 #include <metal/alloc.h>
 #include <metal/log.h>
 #include <metal/utilities.h>
@@ -223,7 +223,9 @@ int remoteproc_config(struct remoteproc *rproc, void *data)
 				ret = rproc->ops->config(rproc, data);
 			else
 				ret = 0;
-			rproc->state = RPROC_READY;
+
+			if (!ret)
+				rproc->state = RPROC_READY;
 		} else {
 			ret = -RPROC_EINVAL;
 		}
@@ -239,8 +241,10 @@ int remoteproc_start(struct remoteproc *rproc)
 	if (rproc) {
 		metal_mutex_acquire(&rproc->lock);
 		if (rproc->state == RPROC_READY) {
-			ret = rproc->ops->start(rproc);
-			rproc->state = RPROC_RUNNING;
+			if (rproc->ops->start)
+				ret = rproc->ops->start(rproc);
+			if (!ret)
+				rproc->state = RPROC_RUNNING;
 		} else {
 			ret = -RPROC_EINVAL;
 		}
@@ -259,8 +263,10 @@ int remoteproc_stop(struct remoteproc *rproc)
 		    rproc->state != RPROC_OFFLINE) {
 			if (rproc->ops->stop)
 				ret = rproc->ops->stop(rproc);
-			rproc->state = RPROC_STOPPED;
-			rproc->bitmap = 0;
+			if (!ret) {
+				rproc->state = RPROC_STOPPED;
+				rproc->bitmap = 0;
+			}
 		} else {
 			ret = 0;
 		}
@@ -301,7 +307,7 @@ void remoteproc_init_mem(struct remoteproc_mem *mem, const char *name,
 	if (!mem || !io || size == 0)
 		return;
 	if (name)
-		(void)strlcpy(mem->name, name, sizeof(mem->name));
+		(void)safe_strcpy(mem->name, sizeof(mem->name), name, RPROC_MAX_NAME_LEN);
 	else
 		mem->name[0] = 0;
 	mem->pa = pa;
