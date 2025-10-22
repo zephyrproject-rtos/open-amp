@@ -48,20 +48,13 @@ extern "C" {
 /* Support to suppress interrupt until specific index is reached. */
 #define VIRTIO_RING_F_EVENT_IDX        (1 << 29)
 
-/* cache invalidation helpers */
-#define CACHE_FLUSH(x, s)		metal_cache_flush(x, s)
-#define CACHE_INVALIDATE(x, s)		metal_cache_invalidate(x, s)
-
-#ifdef VIRTIO_CACHED_VRINGS
-#warning "VIRTIO_CACHED_VRINGS is deprecated, please use VIRTIO_USE_DCACHE"
-#endif
-#if defined(VIRTIO_CACHED_VRINGS) || defined(VIRTIO_USE_DCACHE)
-#define VRING_FLUSH(x, s)		CACHE_FLUSH(x, s)
-#define VRING_INVALIDATE(x, s)		CACHE_INVALIDATE(x, s)
+#if defined(VIRTIO_USE_DCACHE)
+#define VRING_FLUSH(x, s)		metal_cache_flush(x, s)
+#define VRING_INVALIDATE(x, s)		metal_cache_invalidate(x, s)
 #else
 #define VRING_FLUSH(x, s)		do { } while (0)
 #define VRING_INVALIDATE(x, s)		do { } while (0)
-#endif /* VIRTIO_CACHED_VRINGS || VIRTIO_USE_DCACHE */
+#endif /* VIRTIO_USE_DCACHE */
 
 /** @brief Buffer descriptor. */
 struct virtqueue_buf {
@@ -289,8 +282,33 @@ void *virtqueue_get_buffer(struct virtqueue *vq, uint32_t *len, uint16_t *idx);
  *
  * @return Pointer to available buffer
  */
-void *virtqueue_get_available_buffer(struct virtqueue *vq, uint16_t *avail_idx,
-				     uint32_t *len);
+void *virtqueue_get_first_avail_buffer(struct virtqueue *vq, uint16_t *avail_idx,
+				       uint32_t *len);
+
+/**
+ * @internal
+ *
+ * @brief Returns the next buffer available for use in the VirtIO queue
+ *
+ * This API retrieves the next available buffer pointer, descriptor table
+ * index, and buffer length from the available buffer chain. The user must
+ * provide the current descriptor table index of the active available
+ * buffer (idx), next_len parameter is optional and not only if next_idx
+ * parameter is not provided.
+ *
+ * Furthermore, the user can retrieve all available buffers in the buffer
+ * chain one by one by repeatedly invoking this API.
+ *
+ * @param vq		Pointer to VirtIO queue control block
+ * @param idx		Index used in vring desc table
+ * @param next_idx	Pointer to the index of the next buffer
+ * @param next_len	Pointer to the length of the next buffer
+ *
+ * @return Pointer to next available buffer of the desc[idx] described or
+ * NULL on failure
+ */
+void *virtqueue_get_next_avail_buffer(struct virtqueue *vq, uint16_t idx,
+				      uint16_t *next_idx, uint32_t *next_len);
 
 /**
  * @internal
