@@ -526,9 +526,13 @@ int remoteproc_load(struct remoteproc *rproc, const char *path,
 		} else if ((ret & RPROC_LOADER_READY_TO_LOAD) != 0) {
 			if (nlen == 0)
 				break;
-			else if ((noffset > (offset + len)) &&
+			else if ((noffset > offset && noffset - offset > len) &&
 				 (store_ops->features & SUPPORT_SEEK) == 0) {
-				/* Required data is not continued, however
+				/*
+				 * Use noffset - offset instead of offset + len
+				 * in the check above to avoid wrapping.
+				 *
+				 * Required data is not continued, however
 				 * seek is not supported, stop to load
 				 * headers such as ELF section headers which
 				 * is usually located to the end of image.
@@ -1013,7 +1017,18 @@ remoteproc_create_virtio(struct remoteproc *rproc,
 		da = vring_rsc->da;
 		num_descs = vring_rsc->num;
 		align = vring_rsc->align;
-		size = vring_size(num_descs, align);
+		/*
+		 * vring_init() rounds the used ring address with a
+		 * ~(align - 1) mask, which only clears low order bits for a
+		 * power of two. A zero alignment computes a NULL used ring
+		 * and any other non power of two value moves the used ring
+		 * outside the vring memory.
+		 */
+		if (!align || (align & (align - 1)))
+			goto err1;
+		size = rproc_virtio_vring_size(num_descs, align);
+		if (!size)
+			goto err1;
 		va = remoteproc_mmap(rproc, NULL, &da, size, 0, &io);
 		if (!va)
 			goto err1;
