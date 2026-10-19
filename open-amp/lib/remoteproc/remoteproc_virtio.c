@@ -32,6 +32,20 @@ static void rproc_virtio_delete_virtqueues(struct virtio_device *vdev)
 	}
 }
 
+static void rpvdev_notify(struct remoteproc_virtio *rpvdev, uint32_t id)
+{
+	int ret;
+
+	if (!rpvdev->notify)
+		return;
+
+	ret = rpvdev->notify(rpvdev->priv, id);
+	if (ret != 0)
+		metal_log(METAL_LOG_ERROR,
+			  "notify failed: id=%lu, ret=%d\r\n",
+			  (unsigned long)id, ret);
+}
+
 static int rproc_virtio_create_virtqueue(struct virtio_device *vdev,
 					 unsigned int flags,
 					 unsigned int idx,
@@ -41,6 +55,7 @@ static int rproc_virtio_create_virtqueue(struct virtio_device *vdev,
 	struct virtio_vring_info *vring_info;
 	struct vring_alloc_info *vring_alloc;
 	int ret;
+	size_t size;
 	(void)flags;
 
 	/* Get the vring information */
@@ -51,6 +66,18 @@ static int rproc_virtio_create_virtqueue(struct virtio_device *vdev,
 	if (vring_info->vq)
 		return ERROR_VQUEUE_INVLD_PARAM;
 
+	/*
+	 * vring_size() rounds with a ~(align - 1) mask, so a non power of
+	 * two alignment understates the region cleared below.
+	 */
+	if (!vring_alloc->align ||
+	    (vring_alloc->align & (vring_alloc->align - 1)))
+		return ERROR_VRING_ALIGN;
+
+	size = rproc_virtio_vring_size(vring_alloc->num_descs, vring_alloc->align);
+	if (!size)
+		return ERROR_VQUEUE_INVLD_PARAM;
+
 	/* Alloc the virtqueue and init it */
 	vring_info->vq = virtqueue_allocate(vring_alloc->num_descs);
 	if (!vring_info->vq)
@@ -58,7 +85,6 @@ static int rproc_virtio_create_virtqueue(struct virtio_device *vdev,
 
 	if (VIRTIO_ROLE_IS_DRIVER(vdev)) {
 		size_t offset = metal_io_virt_to_offset(vring_info->io, vring_alloc->vaddr);
-		size_t size = vring_size(vring_alloc->num_descs, vring_alloc->align);
 
 		metal_io_block_set(vring_info->io, offset, 0, size);
 	}
@@ -110,7 +136,7 @@ static void rproc_virtio_virtqueue_notify(struct virtqueue *vq)
 	rpvdev = metal_container_of(vdev, struct remoteproc_virtio, vdev);
 	metal_assert(vq_id < vdev->vrings_num);
 	vring_info = &vdev->vrings_info[vq_id];
-	rpvdev->notify(rpvdev->priv, vring_info->notifyid);
+	rpvdev_notify(rpvdev, vring_info->notifyid);
 }
 
 static unsigned char rproc_virtio_get_status(struct virtio_device *vdev)
@@ -144,7 +170,7 @@ static void rproc_virtio_set_status(struct virtio_device *vdev,
 			metal_io_virt_to_offset(io, &vdev_rsc->status),
 			status);
 	RSC_TABLE_FLUSH(vdev_rsc, sizeof(struct fw_rsc_vdev));
-	rpvdev->notify(rpvdev->priv, vdev->notifyid);
+	rpvdev_notify(rpvdev, vdev->notifyid);
 }
 #endif
 
@@ -199,7 +225,7 @@ static void rproc_virtio_set_features(struct virtio_device *vdev,
 			 metal_io_virt_to_offset(io, &vdev_rsc->gfeatures),
 			 features);
 	RSC_TABLE_FLUSH(vdev_rsc, sizeof(struct fw_rsc_vdev));
-	rpvdev->notify(rpvdev->priv, vdev->notifyid);
+	rpvdev_notify(rpvdev, vdev->notifyid);
 }
 
 static uint32_t rproc_virtio_negotiate_features(struct virtio_device *vdev,
@@ -253,7 +279,7 @@ static void rproc_virtio_write_config(struct virtio_device *vdev,
 				metal_io_virt_to_offset(io, config + offset),
 				src, length);
 		RSC_TABLE_FLUSH(config + offset, length);
-		rpvdev->notify(rpvdev->priv, vdev->notifyid);
+		rpvdev_notify(rpvdev, vdev->notifyid);
 	}
 }
 
@@ -361,8 +387,17 @@ int rproc_virtio_init_vring(struct virtio_device *vdev, unsigned int index,
 	struct virtio_vring_info *vring_info;
 	unsigned int num_vrings;
 
+	if (!vdev)
+		return -RPROC_EINVAL;
 	num_vrings = vdev->vrings_num;
-	if ((index >= num_vrings) || (num_descs > RPROC_MAX_VRING_DESC))
+	/*
+	 * Recheck the resource values before storing the vring metadata.
+	 * vring_init() masks the used ring address with ~(align - 1), so the
+	 * alignment has to be a power of two for that mask to clear only low
+	 * order bits.
+	 */
+	if (index >= num_vrings || num_descs > RPROC_MAX_VRING_DESC ||
+	    !rproc_virtio_vring_size(num_descs, align))
 		return -RPROC_EINVAL;
 	vring_info = &vdev->vrings_info[index];
 	vring_info->io = io;

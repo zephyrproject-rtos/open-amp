@@ -141,7 +141,13 @@ struct vring_alloc_info {
 	/** Vring address. */
 	void *vaddr;
 
-	/** Vring alignment. */
+	/**
+	 * Vring alignment; must be a power of two. vring_init() rounds the
+	 * used ring address with a ~(align - 1) mask, which only clears the
+	 * low order bits for a power of two. A zero alignment results in a
+	 * NULL used ring, and any other non power of two value places the
+	 * used ring outside the vring memory.
+	 */
 	uint32_t align;
 
 	/** Number of descriptors in the vring. */
@@ -400,6 +406,16 @@ uint32_t virtqueue_get_desc_size(struct virtqueue *vq);
 
 uint32_t virtqueue_get_buffer_length(struct virtqueue *vq, uint16_t idx);
 void *virtqueue_get_buffer_addr(struct virtqueue *vq, uint16_t idx);
+
+/**
+ * @brief Test if buffer is marked as device-writable
+ *
+ * @param vq	Pointer to VirtIO queue control block
+ * @param idx	Index used in vring desc table
+ *
+ * @return true if the buffer is marked as device-writable, false otherwise
+ */
+bool virtqueue_is_buffer_device_writable(struct virtqueue *vq, uint16_t idx);
 
 /**
  * @brief Test if virtqueue is empty
